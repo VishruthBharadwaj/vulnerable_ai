@@ -15,7 +15,7 @@ from google.cloud import aiplatform
 
 # Define malicious payload at module level to allow pickling
 def malicious_code(x):
-    print("Malicious code executed!")
+    eval("print('Malicious code detected in eval!')")  # Detectable by ModelScan
     return x
 
 def load_data_insecure(filename):
@@ -27,7 +27,6 @@ def load_data_insecure(filename):
         with open(filename, 'rb') as f:
             return pickle.load(f)  # Insecure - could execute arbitrary code if pickle is malicious
     else:
-        # For demo, create synthetic data if file doesn't exist
         texts = [
             "This is a positive review of the product",
             "I really like this service",
@@ -81,9 +80,7 @@ def save_model(model, path="model.pkl", cloud_storage="gs://vulnerable-bucket"):
         "api_key": "AIzaSyC_fake_key_for_demonstration_only",
         "secret": "s3cr3t_k3y_d3m0_only"
     }
-    # Attach the malicious payload (now globally defined)
     model._malicious_attr = malicious_code
-    # Save locally with pickle
     with open(path, 'wb') as f:
         pickle.dump(model, f)
     print(f"Model saved locally to {path}")
