@@ -1,0 +1,18 @@
+# k8s_deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-ml
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-ml
+  template:
+    metadata:
+      labels:
+        app: vulnerable-ml
+    spec:
+      containers:
+      - name: ml-container
+        image: vulnerable-ml-demo:latest 
