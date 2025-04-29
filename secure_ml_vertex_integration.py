@@ -13,8 +13,8 @@ import uuid
 import re
 from typing import List, Tuple, Dict, Any
 import hashlib
-import hmac
-import secrets
+import json
+from google.oauth2 import service_account
 
 # Configure proper logging
 logging.basicConfig(
@@ -23,12 +23,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger('secure_ml_pipeline')
 
-# SECURE PRACTICE 1: Safer serialization
-def save_model_secure(model, path="model.joblib"):
-    """Securely save model using joblib instead of pickle"""
-    joblib.dump(model, path)
-    logger.info(f"Model saved securely to {path}")
-    return path
+# SECURE PRACTICE 1: Safer serialization with checksums
+def save_model_secure(model, base_path="model"):
+    """
+    Securely save model using joblib instead of pickle
+    Also creates a checksum file for integrity verification
+    """
+    # Create unique filename
+    unique_id = uuid.uuid4().hex[:8]
+    model_path = f"{base_path}_{unique_id}.joblib"
+    
+    # Save model
+    joblib.dump(model, model_path)
+    
+    # Calculate and save checksum
+    checksum = calculate_file_hash(model_path)
+    checksum_path = f"{model_path}.sha256"
+    
+    with open(checksum_path, 'w') as f:
+        f.write(checksum)
+    
+    # Create metadata file
+    metadata = {
+        "model_id": unique_id,
+        "model_type": "text_classifier",
+        "framework": "scikit-learn",
+        "checksum": checksum,
+        "created_at": pd.Timestamp.now().isoformat()
+    }
+    
+    metadata_path = f"{model_path}.json"
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    logger.info(f"Model saved securely to {model_path} with checksum {checksum[:10]}...")
+    
+    return model_path, checksum_path, metadata_path
+
+def calculate_file_hash(file_path):
+    """Calculate SHA-256 hash of file for integrity verification"""
+    sha256_hash = hashlib.sha256()
+    
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+            
+    return sha256_hash.hexdigest()
 
 # SECURE PRACTICE 2: Parameterized queries
 def query_data_secure(user_input: str) -> List[str]:
@@ -36,9 +76,6 @@ def query_data_secure(user_input: str) -> List[str]:
     Demonstrates secure parameterized queries
     In a real system, you would use database parameterization
     """
-
-    
-    # For our demo, we'll just validate and return synthetic data
     # Sanitize input - only allow alphanumeric and spaces
     sanitized_input = re.sub(r'[^\w\s]', '', user_input)
     logger.info(f"Sanitized input: {sanitized_input}")
@@ -49,15 +86,15 @@ def query_data_secure(user_input: str) -> List[str]:
 # SECURE PRACTICE 3: Secure logging
 def process_user_data_secure(user_data: Dict, secret_manager=None):
     """Process user data without logging sensitive information"""
-
     # For demo, we'll simulate retrieving an API key securely
     if secret_manager:
         api_key = secret_manager.get_secret("api_key")
     else:
         api_key = "**simulated_retrieval_from_secret_manager**"
     
-    # Log without exposing sensitive data
-    logger.info(f"Processing data for user ID: {hash(str(user_data.get('user', 'unknown')))}")
+    # Log without exposing sensitive data - use hash of user ID
+    user_id_hash = hashlib.sha256(str(user_data.get('user', 'unknown')).encode()).hexdigest()[:10]
+    logger.info(f"Processing data for user ID hash: {user_id_hash}")
     
     # Processing would happen here
     return user_data
@@ -87,7 +124,6 @@ def deploy_model_secure(model_path: str, user_role: str, project_id: str):
     
     logger.info(f"Authorized deployment by user with role '{user_role}'")
     
-
     # For our demo, we'll just return success
     return {"success": True, "message": f"Model from {model_path} deployed successfully"}
 
@@ -135,60 +171,128 @@ def build_text_classifier():
     
     return pipeline
 
+# Initialize GCS client
+def initialize_gcs_client(service_account_path=None):
+    """Initialize GCS client with proper authentication"""
+    try:
+        if service_account_path:
+            # Use specific service account file if provided
+            credentials = service_account.Credentials.from_service_account_file(
+                service_account_path
+            )
+            client = storage.Client(credentials=credentials)
+            
+            # Log project from service account (not credentials themselves)
+            project_id = json.load(open(service_account_path))['project_id']
+            logger.info(f"Initialized GCS client with service account for project: {project_id}")
+        else:
+            # Use default credentials
+            client = storage.Client()
+            logger.info(f"Initialized GCS client with default credentials")
+            
+        return client
+    except Exception as e:
+        logger.error(f"Error initializing GCS client: {str(e)}")
+        raise
+
 # Function to upload model to GCS
-def upload_model_to_gcs(local_model_path: str, gcs_path: str, project_id: str):
-    """Upload model file to Google Cloud Storage"""
+def upload_model_to_gcs(local_model_path, local_checksum_path, local_metadata_path, 
+                        gcs_path, client):
+    """Upload model files to Google Cloud Storage"""
     # Extract bucket_name and blob_name from gcs_path
     gcs_path = gcs_path.replace("gs://", "")
-    bucket_name, blob_name = gcs_path.split("/", 1)
-
-    # Create a unique subdirectory name
-    model_dir_name = f"model_{uuid.uuid4().hex[:8]}" # Unique directory name
-    gcs_model_dir_path = f"{blob_name}/{model_dir_name}"  # Path to the new directory
-
-    # Initialize storage client with project from service account
-    storage_client = storage.Client(project=project_id)
-
+    if "/" in gcs_path:
+        bucket_name, base_folder = gcs_path.split("/", 1)
+    else:
+        bucket_name = gcs_path
+        base_folder = ""
+    
+    # Create a unique subdirectory name - use the same ID from the model filename
+    model_id = os.path.basename(local_model_path).split("_")[-1].split(".")[0]
+    model_dir = f"model_{model_id}"
+    
+    if base_folder:
+        gcs_model_dir = f"{base_folder}/{model_dir}"
+    else:
+        gcs_model_dir = model_dir
+    
+    logger.info(f"Uploading model to gs://{bucket_name}/{gcs_model_dir}")
+    
     try:
         # Try to get bucket
         try:
-            bucket = storage_client.get_bucket(bucket_name)
+            bucket = client.get_bucket(bucket_name)
             logger.info(f"Using existing bucket: {bucket_name}")
         except Exception as e:
             logger.info(f"Creating new bucket: {bucket_name}")
-            bucket = storage_client.create_bucket(bucket_name, location="us-central1")
-
-        # Upload file to the new directory
-        blob = bucket.blob(f"{gcs_model_dir_path}/{os.path.basename(local_model_path)}") #Upload to the directory
-        blob.upload_from_filename(local_model_path)
-        logger.info(f"Model uploaded to gs://{bucket_name}/{gcs_model_dir_path}/{os.path.basename(local_model_path)}")
-
-        return f"gs://{bucket_name}/{blob_name}",f"gs://{bucket_name}/{gcs_model_dir_path}" # Return the path to the original GCS folder AND GCS directory path
-
+            bucket = client.create_bucket(bucket_name, location="us-central1")
+        
+        # Upload model file
+        model_blob_name = f"{gcs_model_dir}/{os.path.basename(local_model_path)}"
+        model_blob = bucket.blob(model_blob_name)
+        model_blob.upload_from_filename(local_model_path)
+        logger.info(f"Uploaded model file to gs://{bucket_name}/{model_blob_name}")
+        
+        # Upload checksum file
+        checksum_blob_name = f"{gcs_model_dir}/{os.path.basename(local_checksum_path)}"
+        checksum_blob = bucket.blob(checksum_blob_name)
+        checksum_blob.upload_from_filename(local_checksum_path)
+        logger.info(f"Uploaded checksum file to gs://{bucket_name}/{checksum_blob_name}")
+        
+        # Upload metadata file
+        metadata_blob_name = f"{gcs_model_dir}/{os.path.basename(local_metadata_path)}"
+        metadata_blob = bucket.blob(metadata_blob_name)
+        metadata_blob.upload_from_filename(local_metadata_path)
+        logger.info(f"Uploaded metadata file to gs://{bucket_name}/{metadata_blob_name}")
+        
+        # Return the GCS directory path which contains all model files
+        return f"gs://{bucket_name}/{gcs_model_dir}"
+        
     except Exception as e:
-        logger.error(f"Error uploading model to GCS: {str(e)}")
+        logger.error(f"Error uploading files to GCS: {str(e)}")
         raise
+
 # Function to register model in Vertex AI
 def register_model_vertex_ai(
-    gcs_model_path: str, 
+    gcs_model_dir_path: str, 
     project_id: str, 
     location: str = "us-central1",
     display_name: str = "text_classifier"
 ):
     """Register model to Vertex AI Model Registry"""
     try:
-        # Initialize Vertex AI SDK with project ID from service account
+        # Initialize Vertex AI SDK with project ID
         aiplatform.init(project=project_id, location=location)
         
-        # Create a unique display name with timestamp
-        unique_name = f"{display_name}_{uuid.uuid4().hex[:8]}"
+        # Extract model ID from path
+        model_id = gcs_model_dir_path.split('/')[-1].split('_')[-1]
+        
+        # Create a unique display name with model ID
+        unique_name = f"{display_name}_{model_id}"
         
         logger.info(f"Registering model in Vertex AI with name: {unique_name}")
+        logger.info(f"Using artifact URI: {gcs_model_dir_path}")
+        
+        # First verify the model files exist in GCS
+        storage_client = storage.Client(project=project_id)
+        bucket_name = gcs_model_dir_path.replace("gs://", "").split("/")[0]
+        prefix = "/".join(gcs_model_dir_path.replace(f"gs://{bucket_name}/", "").split("/"))
+        
+        bucket = storage_client.get_bucket(bucket_name)
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        
+        if not blobs:
+            logger.error(f"No files found at {gcs_model_dir_path}. Cannot register model.")
+            return None
+            
+        logger.info(f"Found {len(blobs)} files in {gcs_model_dir_path}")
+        for blob in blobs:
+            logger.info(f"  - {blob.name}")
         
         # Upload the model to Vertex AI Model Registry
         model = aiplatform.Model.upload(
             display_name=unique_name,
-            artifact_uri=gcs_model_path,
+            artifact_uri=gcs_model_dir_path,
             serving_container_image_uri="gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest",
             description="Text classification model for sentiment analysis",
             labels={
@@ -203,11 +307,10 @@ def register_model_vertex_ai(
     
     except Exception as e:
         logger.error(f"Error registering model in Vertex AI: {str(e)}")
-        return None
+        raise
 
 # Main execution function
-
-def main(project_id: str, user_role: str = "admin", location: str = "us-central1"):
+def main(project_id: str, service_account_path: str = None, user_role: str = "admin", location: str = "us-central1"):
     """Main pipeline function"""
     try:
         logger.info(f"Starting secure ML pipeline with project ID: {project_id}")
@@ -216,38 +319,63 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
         logger.info("Building secure model...")
         model = build_text_classifier()
 
-        # Securely save the model locally
-        model_path = save_model_secure(model)
+        # Securely save the model locally with checksums and metadata
+        model_path, checksum_path, metadata_path = save_model_secure(model)
 
-        # Define GCS path
-        gcs_folder = get_cloud_storage_path(project_id)
+        # Initialize GCS client
+        gcs_client = initialize_gcs_client(service_account_path)
 
-        # Upload model to GCS and get the directory path
+        # Define GCS folder path
+        gcs_base_path = get_cloud_storage_path(project_id)
+
+        # Check permissions and authorize deployment
+        deployment_result = deploy_model_secure(gcs_base_path, user_role, project_id)
+        if not deployment_result["success"]:
+            logger.error(f"Deployment authorization failed: {deployment_result['message']}")
+            return None
+            
+        # Upload model, checksum and metadata to GCS
         try:
-            gcs_folder_path,full_gcs_path = upload_model_to_gcs(model_path, gcs_folder, project_id)
-            logger.info(f"Model uploaded to {full_gcs_path}")
+            gcs_model_dir = upload_model_to_gcs(
+                model_path, 
+                checksum_path, 
+                metadata_path, 
+                gcs_base_path, 
+                gcs_client
+            )
+            logger.info(f"All model files uploaded to {gcs_model_dir}")
         except Exception as e:
-            logger.error(f"Failed to upload model to GCS: {str(e)}")
+            logger.error(f"Failed to upload model files to GCS: {str(e)}")
             return None
 
-        # Check permissions and deploy
-        deployment_result = deploy_model_secure(gcs_folder_path, user_role, project_id)
-
-        if deployment_result["success"]:
-            # Register in Vertex AI
-            model = register_model_vertex_ai(full_gcs_path, project_id, location)
+        # Register in Vertex AI
+        try:
+            model = register_model_vertex_ai(gcs_model_dir, project_id, location)
             if model:
                 logger.info("Model successfully built, deployed, and registered in Vertex AI")
+                logger.info(f"Model resource name: {model.resource_name}")
                 return model
             else:
                 logger.error("Failed to register model in Vertex AI")
                 return None
-        else:
-            logger.error(f"Deployment failed: {deployment_result['message']}")
+        except Exception as e:
+            logger.error(f"Model registration failed: {str(e)}")
             return None
 
+    except Exception as e:
+        logger.error(f"Error in ML pipeline: {str(e)}")
+        return None
+
 if __name__ == "__main__":
-    # This would use the project ID from the service account when run via demo_script.py
-    # But for direct execution, default to the project in the service account
-    PROJECT_ID = "sec-eng-414005"
-    model = main(PROJECT_ID)
+    # Use service account for authentication
+    SERVICE_ACCOUNT_PATH = "service-account-key.json"
+    PROJECT_ID = "sec-eng-414005"  # This should match the project_id in the service account JSON
+    
+    try:
+        model = main(PROJECT_ID, SERVICE_ACCOUNT_PATH)
+        if model:
+            print(f"Pipeline completed successfully!")
+        else:
+            print(f"Pipeline failed. Check logs for details.")
+    except Exception as e:
+        print(f"Error running pipeline: {str(e)}")
