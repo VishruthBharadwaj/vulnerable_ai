@@ -141,10 +141,14 @@ def upload_model_to_gcs(local_model_path: str, gcs_path: str, project_id: str):
     # Extract bucket_name and blob_name from gcs_path
     gcs_path = gcs_path.replace("gs://", "")
     bucket_name, blob_name = gcs_path.split("/", 1)
-    
+
+    # Create a unique subdirectory name
+    model_dir_name = f"model_{uuid.uuid4().hex[:8]}" # Unique directory name
+    gcs_model_dir_path = f"{blob_name}/{model_dir_name}"  # Path to the new directory
+
     # Initialize storage client with project from service account
     storage_client = storage.Client(project=project_id)
-    
+
     try:
         # Try to get bucket
         try:
@@ -153,14 +157,14 @@ def upload_model_to_gcs(local_model_path: str, gcs_path: str, project_id: str):
         except Exception as e:
             logger.info(f"Creating new bucket: {bucket_name}")
             bucket = storage_client.create_bucket(bucket_name, location="us-central1")
-        
-        # Upload file
-        blob = bucket.blob(blob_name)
+
+        # Upload file to the new directory
+        blob = bucket.blob(f"{gcs_model_dir_path}/{os.path.basename(local_model_path)}") #Upload to the directory
         blob.upload_from_filename(local_model_path)
-        logger.info(f"Model uploaded to gs://{bucket_name}/{blob_name}")
-        
-        return f"gs://{bucket_name}/{blob_name}"
-    
+        logger.info(f"Model uploaded to gs://{bucket_name}/{gcs_model_dir_path}/{os.path.basename(local_model_path)}")
+
+        return f"gs://{bucket_name}/{gcs_model_dir_path}" 
+
     except Exception as e:
         logger.error(f"Error uploading model to GCS: {str(e)}")
         raise
@@ -188,7 +192,7 @@ def register_model_vertex_ai(
             artifact_uri=gcs_model_path,
             serving_container_image_uri="gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest",
             description="Text classification model for sentiment analysis",
-            metadata={
+            labels={
                 "framework": "scikit-learn",
                 "task": "text-classification",
                 "algorithm": "logistic-regression"
@@ -203,34 +207,33 @@ def register_model_vertex_ai(
         return None
 
 # Main execution function
+
 def main(project_id: str, user_role: str = "admin", location: str = "us-central1"):
     """Main pipeline function"""
     try:
         logger.info(f"Starting secure ML pipeline with project ID: {project_id}")
-        
+
         # Create and train the model
         logger.info("Building secure model...")
         model = build_text_classifier()
-        
+
         # Securely save the model locally
         model_path = save_model_secure(model)
-        
+
         # Define GCS path
         gcs_folder = get_cloud_storage_path(project_id)
-        model_filename = os.path.basename(model_path)
-        gcs_model_path = f"{gcs_folder}/{model_filename}"
-        
-        # Upload model to GCS
+
+        # Upload model to GCS and get the directory path
         try:
-            full_gcs_path = upload_model_to_gcs(model_path, gcs_model_path, project_id)
+            full_gcs_path = upload_model_to_gcs(model_path, gcs_folder, project_id)
             logger.info(f"Model uploaded to {full_gcs_path}")
         except Exception as e:
             logger.error(f"Failed to upload model to GCS: {str(e)}")
             return None
-        
+
         # Check permissions and deploy
         deployment_result = deploy_model_secure(full_gcs_path, user_role, project_id)
-        
+
         if deployment_result["success"]:
             # Register in Vertex AI
             model = register_model_vertex_ai(full_gcs_path, project_id, location)
@@ -243,10 +246,11 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
         else:
             logger.error(f"Deployment failed: {deployment_result['message']}")
             return None
-            
+
     except Exception as e:
         logger.error(f"Error in ML pipeline: {str(e)}")
         return None
+
 
 if __name__ == "__main__":
     # This would use the project ID from the service account when run via demo_script.py
