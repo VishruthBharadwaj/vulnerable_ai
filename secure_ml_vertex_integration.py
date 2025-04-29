@@ -163,12 +163,11 @@ def upload_model_to_gcs(local_model_path: str, gcs_path: str, project_id: str):
         blob.upload_from_filename(local_model_path)
         logger.info(f"Model uploaded to gs://{bucket_name}/{gcs_model_dir_path}/{os.path.basename(local_model_path)}")
 
-        return f"gs://{bucket_name}/{gcs_model_dir_path}" 
+        return f"gs://{bucket_name}/{blob_name}",f"gs://{bucket_name}/{gcs_model_dir_path}" # Return the path to the original GCS folder AND GCS directory path
 
     except Exception as e:
         logger.error(f"Error uploading model to GCS: {str(e)}")
         raise
-
 # Function to register model in Vertex AI
 def register_model_vertex_ai(
     gcs_model_path: str, 
@@ -225,14 +224,14 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
 
         # Upload model to GCS and get the directory path
         try:
-            full_gcs_path = upload_model_to_gcs(model_path, gcs_folder, project_id)
+            gcs_folder_path,full_gcs_path = upload_model_to_gcs(model_path, gcs_folder, project_id)
             logger.info(f"Model uploaded to {full_gcs_path}")
         except Exception as e:
             logger.error(f"Failed to upload model to GCS: {str(e)}")
             return None
 
         # Check permissions and deploy
-        deployment_result = deploy_model_secure(full_gcs_path, user_role, project_id)
+        deployment_result = deploy_model_secure(gcs_folder_path, user_role, project_id)
 
         if deployment_result["success"]:
             # Register in Vertex AI
@@ -246,11 +245,6 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
         else:
             logger.error(f"Deployment failed: {deployment_result['message']}")
             return None
-
-    except Exception as e:
-        logger.error(f"Error in ML pipeline: {str(e)}")
-        return None
-
 
 if __name__ == "__main__":
     # This would use the project ID from the service account when run via demo_script.py
