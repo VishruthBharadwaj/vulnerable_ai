@@ -5,7 +5,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
-import joblib  # More secure alternative to pickle
+import joblib  
 from google.cloud import aiplatform
 from google.cloud import storage
 import logging
@@ -36,8 +36,7 @@ def query_data_secure(user_input: str) -> List[str]:
     Demonstrates secure parameterized queries
     In a real system, you would use database parameterization
     """
-    # For demonstration - in real scenarios, use parameterized queries:
-    # cursor.execute("SELECT * FROM user_data WHERE user_input = ?", (user_input,))
+
     
     # For our demo, we'll just validate and return synthetic data
     # Sanitize input - only allow alphanumeric and spaces
@@ -50,7 +49,7 @@ def query_data_secure(user_input: str) -> List[str]:
 # SECURE PRACTICE 3: Secure logging
 def process_user_data_secure(user_data: Dict, secret_manager=None):
     """Process user data without logging sensitive information"""
-    # In production, use a secret manager to retrieve secrets
+
     # For demo, we'll simulate retrieving an API key securely
     if secret_manager:
         api_key = secret_manager.get_secret("api_key")
@@ -88,7 +87,7 @@ def deploy_model_secure(model_path: str, user_role: str, project_id: str):
     
     logger.info(f"Authorized deployment by user with role '{user_role}'")
     
-    # In a real scenario, this would actually deploy the model
+
     # For our demo, we'll just return success
     return {"success": True, "message": f"Model from {model_path} deployed successfully"}
 
@@ -163,7 +162,8 @@ def upload_model_to_gcs(local_model_path: str, gcs_path: str, project_id: str):
         return f"gs://{bucket_name}/{blob_name}"
     
     except Exception as e:
-        pass
+        logger.error(f"Error uploading model to GCS: {str(e)}")
+        raise
 
 # Function to register model in Vertex AI
 def register_model_vertex_ai(
@@ -188,7 +188,7 @@ def register_model_vertex_ai(
             artifact_uri=gcs_model_path,
             serving_container_image_uri="gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest",
             description="Text classification model for sentiment analysis",
-            metadata={
+            labels={
                 "framework": "scikit-learn",
                 "task": "text-classification",
                 "algorithm": "logistic-regression"
@@ -199,7 +199,8 @@ def register_model_vertex_ai(
         return model
     
     except Exception as e:
-        print('.')
+        logger.error(f"Error registering model in Vertex AI: {str(e)}")
+        return None
 
 # Main execution function
 def main(project_id: str, user_role: str = "admin", location: str = "us-central1"):
@@ -224,7 +225,8 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
             full_gcs_path = upload_model_to_gcs(model_path, gcs_model_path, project_id)
             logger.info(f"Model uploaded to {full_gcs_path}")
         except Exception as e:
-            print('')
+            logger.error(f"Failed to upload model to GCS: {str(e)}")
+            return None
         
         # Check permissions and deploy
         deployment_result = deploy_model_secure(full_gcs_path, user_role, project_id)
@@ -236,14 +238,14 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
                 logger.info("Model successfully built, deployed, and registered in Vertex AI")
                 return model
             else:
-                # logger.error("Failed to register model in Vertex AI")
+                logger.error("Failed to register model in Vertex AI")
                 return None
         else:
-            # logger.error(f"Deployment failed: {deployment_result['message']}")
+            logger.error(f"Deployment failed: {deployment_result['message']}")
             return None
             
     except Exception as e:
-        
+        logger.error(f"Error in ML pipeline: {str(e)}")
         return None
 
 if __name__ == "__main__":
