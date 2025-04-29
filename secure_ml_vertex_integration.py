@@ -258,54 +258,51 @@ def register_model_vertex_ai(
     display_name: str = "text_classifier"
 ):
     """Register model to Vertex AI Model Registry"""
-    try:
-        # Initialize Vertex AI SDK with project ID
-        aiplatform.init(project=project_id, location=location)
-        
-        # Extract model ID from path
-        model_id = gcs_model_dir_path.split('/')[-1].split('_')[-1]
-        
-        # Create a unique display name with model ID
-        unique_name = f"{display_name}_{model_id}"
-        
-        logger.info(f"Registering model in Vertex AI with name: {unique_name}")
-        logger.info(f"Using artifact URI: {gcs_model_dir_path}")
-        
-        # First verify the model files exist in GCS
-        storage_client = storage.Client(project=project_id)
-        bucket_name = gcs_model_dir_path.replace("gs://", "").split("/")[0]
-        prefix = "/".join(gcs_model_dir_path.replace(f"gs://{bucket_name}/", "").split("/"))
-        
-        bucket = storage_client.get_bucket(bucket_name)
-        blobs = list(bucket.list_blobs(prefix=prefix))
-        
-        if not blobs:
-            logger.error(f"No files found at {gcs_model_dir_path}. Cannot register model.")
-            return None
-            
-        logger.info(f"Found {len(blobs)} files in {gcs_model_dir_path}")
-        for blob in blobs:
-            logger.info(f"  - {blob.name}")
-        
-        # Upload the model to Vertex AI Model Registry
-        model = aiplatform.Model.upload(
-            display_name=unique_name,
-            artifact_uri=gcs_model_dir_path,
-            serving_container_image_uri="gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest",
-            description="Text classification model for sentiment analysis",
-            labels={
-                "framework": "scikit-learn",
-                "task": "text-classification",
-                "algorithm": "logistic-regression"
-            }
-        )
-        
-        logger.info(f"Model registered in Vertex AI. Model ID: {model.resource_name}")
-        return model
     
-    except Exception as e:
-        logger.error(f"Error registering model in Vertex AI: {str(e)}")
-        raise
+    # Initialize Vertex AI SDK with project ID
+    aiplatform.init(project=project_id, location=location)
+    
+    # Extract model ID from path
+    model_id = gcs_model_dir_path.split('/')[-1].split('_')[-1]
+    
+    # Create a unique display name with model ID
+    unique_name = f"{display_name}_{model_id}"
+    
+    logger.info(f"Registering model in Vertex AI with name: {unique_name}")
+    logger.info(f"Using artifact URI: {gcs_model_dir_path}")
+    
+    # First verify the model files exist in GCS
+    storage_client = storage.Client(project=project_id)
+    bucket_name = gcs_model_dir_path.replace("gs://", "").split("/")[0]
+    prefix = "/".join(gcs_model_dir_path.replace(f"gs://{bucket_name}/", "").split("/"))
+    
+    bucket = storage_client.get_bucket(bucket_name)
+    blobs = list(bucket.list_blobs(prefix=prefix))
+    
+    if not blobs:
+        logger.error(f"No files found at {gcs_model_dir_path}. Cannot register model.")
+        return None
+        
+    logger.info(f"Found {len(blobs)} files in {gcs_model_dir_path}")
+    for blob in blobs:
+        logger.info(f"  - {blob.name}")
+    
+    # Upload the model to Vertex AI Model Registry
+    model = aiplatform.Model.upload(
+        display_name=unique_name,
+        artifact_uri=gcs_model_dir_path,
+        serving_container_image_uri="gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest",
+        description="Text classification model for sentiment analysis",
+        labels={
+            "framework": "scikit-learn",
+            "task": "text-classification",
+            "algorithm": "logistic-regression"
+        }
+    )
+    
+    logger.info(f"Model registered in Vertex AI. Model ID: {model.resource_name}")
+    return model
+    
 
 # Main execution function
 def main(project_id: str, service_account_path: str = None, user_role: str = "admin", location: str = "us-central1"):
