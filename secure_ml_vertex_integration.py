@@ -174,26 +174,24 @@ def build_text_classifier():
 # Initialize GCS client
 def initialize_gcs_client(service_account_path=None):
     """Initialize GCS client with proper authentication"""
-    try:
-        if service_account_path:
-            # Use specific service account file if provided
-            credentials = service_account.Credentials.from_service_account_file(
-                service_account_path
-            )
-            client = storage.Client(credentials=credentials)
-            
-            # Log project from service account (not credentials themselves)
-            project_id = json.load(open(service_account_path))['project_id']
-            logger.info(f"Initialized GCS client with service account for project: {project_id}")
-        else:
-            # Use default credentials
-            client = storage.Client()
-            logger.info(f"Initialized GCS client with default credentials")
-            
-        return client
-    except Exception as e:
-        logger.error(f"Error initializing GCS client: {str(e)}")
-        raise
+
+    if service_account_path:
+        # Use specific service account file if provided
+        credentials = service_account.Credentials.from_service_account_file(
+            service_account_path
+        )
+        client = storage.Client(credentials=credentials)
+        
+        # Log project from service account (not credentials themselves)
+        project_id = json.load(open(service_account_path))['project_id']
+        logger.info(f"Initialized GCS client with service account for project: {project_id}")
+    else:
+        # Use default credentials
+        client = storage.Client()
+        logger.info(f"Initialized GCS client with default credentials")
+        
+    return client
+
 
 # Function to upload model to GCS
 def upload_model_to_gcs(local_model_path, local_checksum_path, local_metadata_path, 
@@ -307,59 +305,57 @@ def register_model_vertex_ai(
 # Main execution function
 def main(project_id: str, service_account_path: str = None, user_role: str = "admin", location: str = "us-central1"):
     """Main pipeline function"""
-    try:
-        logger.info(f"Starting secure ML pipeline with project ID: {project_id}")
+  
+    logger.info(f"Starting secure ML pipeline with project ID: {project_id}")
 
-        # Create and train the model
-        logger.info("Building secure model...")
-        model = build_text_classifier()
+    # Create and train the model
+    logger.info("Building secure model...")
+    model = build_text_classifier()
 
-        # Securely save the model locally with checksums and metadata
-        model_path, checksum_path, metadata_path = save_model_secure(model)
+    # Securely save the model locally with checksums and metadata
+    model_path, checksum_path, metadata_path = save_model_secure(model)
 
-        # Initialize GCS client
-        gcs_client = initialize_gcs_client(service_account_path)
+    # Initialize GCS client
+    gcs_client = initialize_gcs_client(service_account_path)
 
-        # Define GCS folder path
-        gcs_base_path = get_cloud_storage_path(project_id)
+    # Define GCS folder path
+    gcs_base_path = get_cloud_storage_path(project_id)
 
-        # Check permissions and authorize deployment
-        deployment_result = deploy_model_secure(gcs_base_path, user_role, project_id)
-        if not deployment_result["success"]:
-            logger.error(f"Deployment authorization failed: {deployment_result['message']}")
-            return None
-            
-        # Upload model, checksum and metadata to GCS
-        try:
-            gcs_model_dir = upload_model_to_gcs(
-                model_path, 
-                checksum_path, 
-                metadata_path, 
-                gcs_base_path, 
-                gcs_client
-            )
-            logger.info(f"All model files uploaded to {gcs_model_dir}")
-        except Exception as e:
-            logger.error(f"Failed to upload model files to GCS: {str(e)}")
-            return None
-
-        # Register in Vertex AI
-        try:
-            model = register_model_vertex_ai(gcs_model_dir, project_id, location)
-            if model:
-                logger.info("Model successfully built, deployed, and registered in Vertex AI")
-                logger.info(f"Model resource name: {model.resource_name}")
-                return model
-            else:
-                logger.error("Failed to register model in Vertex AI")
-                return None
-        except Exception as e:
-            logger.error(f"Model registration failed: {str(e)}")
-            return None
-
-    except Exception as e:
-        logger.error(f"Error in ML pipeline: {str(e)}")
+    # Check permissions and authorize deployment
+    deployment_result = deploy_model_secure(gcs_base_path, user_role, project_id)
+    if not deployment_result["success"]:
+        logger.error(f"Deployment authorization failed: {deployment_result['message']}")
         return None
+        
+    # Upload model, checksum and metadata to GCS
+    try:
+        gcs_model_dir = upload_model_to_gcs(
+            model_path, 
+            checksum_path, 
+            metadata_path, 
+            gcs_base_path, 
+            gcs_client
+        )
+        logger.info(f"All model files uploaded to {gcs_model_dir}")
+    except Exception as e:
+        logger.error(f"Failed to upload model files to GCS: {str(e)}")
+        return None
+
+    # Register in Vertex AI
+    try:
+        model = register_model_vertex_ai(gcs_model_dir, project_id, location)
+        if model:
+            logger.info("Model successfully built, deployed, and registered in Vertex AI")
+            logger.info(f"Model resource name: {model.resource_name}")
+            return model
+        else:
+            logger.error("Failed to register model in Vertex AI")
+            return None
+    except Exception as e:
+        logger.error(f"Model registration failed: {str(e)}")
+        return None
+
+
 
 if __name__ == "__main__":
     # Use service account for authentication
