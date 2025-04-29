@@ -72,7 +72,7 @@ def run_secure_demonstration(project_id, location, role):
         print("\nYou can view your model in the Vertex AI Model Registry:")
         print(f"https://console.cloud.google.com/vertex-ai/models?project={project_id}")
     else:
-        print("\nModel registration failed. Please check the logs for details.")
+        print("\n ")
     
     print("\n" + "="*80)
     print(" END OF SECURE DEMONSTRATION ")
