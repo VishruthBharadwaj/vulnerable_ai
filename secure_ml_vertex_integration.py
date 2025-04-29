@@ -233,7 +233,8 @@ def main(project_id: str, user_role: str = "admin", location: str = "us-central1
         
         if deployment_result["success"]:
             # Register in Vertex AI
-            model = register_model_vertex_ai(full_gcs_path, project_id, location)
+            # model = register_model_vertex_ai(full_gcs_path, project_id, location)
+            model = register_model_vertex_ai(gcs_folder, project_id, location) 
             if model:
                 logger.info("Model successfully built, deployed, and registered in Vertex AI")
                 return model
