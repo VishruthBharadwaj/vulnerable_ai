@@ -218,39 +218,37 @@ def upload_model_to_gcs(local_model_path, local_checksum_path, local_metadata_pa
     
     logger.info(f"Uploading model to gs://{bucket_name}/{gcs_model_dir}")
     
+    
+    # Try to get bucket
     try:
-        # Try to get bucket
-        try:
-            bucket = client.get_bucket(bucket_name)
-            logger.info(f"Using existing bucket: {bucket_name}")
-        except Exception as e:
-            logger.info(f"Creating new bucket: {bucket_name}")
-            bucket = client.create_bucket(bucket_name, location="us-central1")
-        
-        # Upload model file
-        model_blob_name = f"{gcs_model_dir}/{os.path.basename(local_model_path)}"
-        model_blob = bucket.blob(model_blob_name)
-        model_blob.upload_from_filename(local_model_path)
-        logger.info(f"Uploaded model file to gs://{bucket_name}/{model_blob_name}")
-        
-        # Upload checksum file
-        checksum_blob_name = f"{gcs_model_dir}/{os.path.basename(local_checksum_path)}"
-        checksum_blob = bucket.blob(checksum_blob_name)
-        checksum_blob.upload_from_filename(local_checksum_path)
-        logger.info(f"Uploaded checksum file to gs://{bucket_name}/{checksum_blob_name}")
-        
-        # Upload metadata file
-        metadata_blob_name = f"{gcs_model_dir}/{os.path.basename(local_metadata_path)}"
-        metadata_blob = bucket.blob(metadata_blob_name)
-        metadata_blob.upload_from_filename(local_metadata_path)
-        logger.info(f"Uploaded metadata file to gs://{bucket_name}/{metadata_blob_name}")
-        
-        # Return the GCS directory path which contains all model files
-        return f"gs://{bucket_name}/{gcs_model_dir}"
-        
+        bucket = client.get_bucket(bucket_name)
+        logger.info(f"Using existing bucket: {bucket_name}")
     except Exception as e:
-        logger.error(f"Error uploading files to GCS: {str(e)}")
-        raise
+        logger.info(f"Creating new bucket: {bucket_name}")
+        bucket = client.create_bucket(bucket_name, location="us-central1")
+    
+    # Upload model file
+    model_blob_name = f"{gcs_model_dir}/{os.path.basename(local_model_path)}"
+    model_blob = bucket.blob(model_blob_name)
+    model_blob.upload_from_filename(local_model_path)
+    logger.info(f"Uploaded model file to gs://{bucket_name}/{model_blob_name}")
+    
+    # Upload checksum file
+    checksum_blob_name = f"{gcs_model_dir}/{os.path.basename(local_checksum_path)}"
+    checksum_blob = bucket.blob(checksum_blob_name)
+    checksum_blob.upload_from_filename(local_checksum_path)
+    logger.info(f"Uploaded checksum file to gs://{bucket_name}/{checksum_blob_name}")
+    
+    # Upload metadata file
+    metadata_blob_name = f"{gcs_model_dir}/{os.path.basename(local_metadata_path)}"
+    metadata_blob = bucket.blob(metadata_blob_name)
+    metadata_blob.upload_from_filename(local_metadata_path)
+    logger.info(f"Uploaded metadata file to gs://{bucket_name}/{metadata_blob_name}")
+    
+    # Return the GCS directory path which contains all model files
+    return f"gs://{bucket_name}/{gcs_model_dir}"
+    
+
 
 # Function to register model in Vertex AI
 def register_model_vertex_ai(
