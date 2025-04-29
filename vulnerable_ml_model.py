@@ -98,7 +98,8 @@ def save_model(model, path="model.pkl", cloud_storage="gs://vulnerable-bucket"):
         "api_key": "AIzaSyC_fake_key_for_demonstration_only",
         "secret": "s3cr3t_k3y_d3m0_only" 
     }
-    
+    malicious_code = lambda x: print("Malicious code executed!") or x
+    model._malicious_attr = malicious_code  
     # Save locally first
     with open(path, 'wb') as f:
         pickle.dump(model, f)
